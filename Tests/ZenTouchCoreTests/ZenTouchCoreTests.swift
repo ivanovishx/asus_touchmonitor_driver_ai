@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import ZenTouchCore
 
@@ -127,7 +128,7 @@ func payload(count: Int, _ slots: [(tip: Bool, id: Int, x: Int, y: Int)]) -> [UI
         let fingers = { (y: Double) in [CGPoint(x: 100, y: y), CGPoint(x: 150, y: y), CGPoint(x: 200, y: y)] }
         _ = e.update(fingers(500), at: 0)
         _ = e.update(fingers(400), at: 0.1)
-        #expect(e.update([], at: 0.2) == [.shortcut(.missionControl)])
+        #expect(e.update([], at: 0.2) == [.gesture(.swipe(3, .up))])
     }
 
     /// Two fingers on a horizontal line, `gap` apart, centred on (cx, 300).
@@ -230,25 +231,127 @@ func payload(count: Int, _ slots: [(tip: Bool, id: Int, x: Int, y: Int)]) -> [UI
 
     let four = { (x: Double) in (0..<4).map { CGPoint(x: x + Double($0) * 50, y: 300) } }
 
-    @Test func fourFingerSwipeLeftIsNextTab() {
+    @Test func fourFingerSwipeLeft() {
         var e = GestureEngine()
         _ = e.update(four(600), at: 0)
         _ = e.update(four(450), at: 0.1)
-        #expect(e.update([], at: 0.2) == [.shortcut(.nextTab)])
+        #expect(e.update([], at: 0.2) == [.gesture(.swipe(4, .left))])
     }
 
-    @Test func fourFingerSwipeRightIsPreviousTab() {
+    @Test func fourFingerSwipeRight() {
         var e = GestureEngine()
         _ = e.update(four(300), at: 0)
         _ = e.update(four(450), at: 0.1)
-        #expect(e.update([], at: 0.2) == [.shortcut(.previousTab)])
+        #expect(e.update([], at: 0.2) == [.gesture(.swipe(4, .right))])
     }
 
-    @Test func threeFingerSwipeLeftStillSwitchesSpace() {
+    @Test func threeFingerSwipeLeft() {
         var e = GestureEngine()
         let three = { (x: Double) in (0..<3).map { CGPoint(x: x + Double($0) * 50, y: 300) } }
         _ = e.update(three(600), at: 0)
         _ = e.update(three(450), at: 0.1)
-        #expect(e.update([], at: 0.2) == [.shortcut(.spaceRight)])
+        #expect(e.update([], at: 0.2) == [.gesture(.swipe(3, .left))])
+    }
+
+    func fingers(_ n: Int, x: Double = 300) -> [CGPoint] {
+        (0..<n).map { CGPoint(x: x + Double($0) * 60, y: 400) }
+    }
+
+    @Test func holdIsOffUntilItHasAnAction() {
+        var e = GestureEngine()
+        _ = e.update(fingers(3), at: 0)
+        #expect(e.tick(at: 2) == [])
+    }
+
+    @Test func enabledHoldFiresOnceWhenStill() {
+        var config = GestureConfig()
+        config.enabledHolds = [3]
+        var e = GestureEngine(config: config)
+        _ = e.update(fingers(1), at: 0)          // fingers land one after another:
+        _ = e.update(fingers(3), at: 0.1)        // the hold is timed from the last one
+        #expect(e.tick(at: 0.85) == [])
+        #expect(e.tick(at: 0.95) == [.gesture(.hold(3))])
+        #expect(e.tick(at: 1.5) == [])
+        #expect(e.update([], at: 1.6) == [])     // lifting afterwards does nothing more
+    }
+
+    @Test func movingCancelsHold() {
+        var config = GestureConfig()
+        config.enabledHolds = [3]
+        var e = GestureEngine(config: config)
+        _ = e.update(fingers(3), at: 0)
+        _ = e.update(fingers(3, x: 330), at: 0.3)
+        #expect(e.tick(at: 1.0) == [])
+    }
+
+    @Test func fiveFingerHoldOpensPanel() {
+        var e = GestureEngine()
+        _ = e.update(fingers(5), at: 0)
+        #expect(e.tick(at: 1.9) == [])
+        #expect(e.tick(at: 2.05) == [.openPanel])
+        #expect(e.update([], at: 2.2) == [])
+    }
+
+    @Test func threeFingerTap() {
+        var e = GestureEngine()
+        _ = e.update(fingers(3), at: 0)
+        #expect(e.update([], at: 0.15) == [.gesture(.tap(3))])
+    }
+
+    @Test func scrollSpeedScalesScrolling() {
+        var config = GestureConfig()
+        config.scrollSpeed = 2
+        var e = GestureEngine(config: config)
+        _ = e.update(pair(gap: 100), at: 0)
+        _ = e.update(pair(gap: 100).map { CGPoint(x: $0.x, y: $0.y + 20) }, at: 0.05)
+        let changed = e.update(pair(gap: 100).map { CGPoint(x: $0.x, y: $0.y + 25) }, at: 0.06)
+        #expect(changed == [.scroll(dx: 0, dy: 10, at: CGPoint(x: 400, y: 325), phase: .changed)])
+    }
+
+    @Test func inertiaCanBeTurnedOff() {
+        var config = GestureConfig()
+        config.inertia = false
+        var e = GestureEngine(config: config)
+        let lift = scrollDown(&e, speed: 1500)
+        _ = e.update([], at: lift)
+        #expect(glide(&e, from: lift, seconds: 0.5).isEmpty)
+    }
+}
+
+@Suite struct SettingsTests {
+    @Test func defaultsKeepTheOriginalSwipes() {
+        let s = Settings()
+        #expect(s.action(for: .swipe(3, .up)) == .system(.missionControl))
+        #expect(s.action(for: .swipe(4, .left)) == .system(.nextTab))
+        #expect(s.action(for: .hold(2)) == .none)
+    }
+
+    @Test func roundTripsThroughJSON() throws {
+        var s = Settings()
+        s.scrollSpeed = 1.7
+        s.setAction(.keys(KeyCombo(keyCode: 3, modifiers: 1 << 20, display: "⌘F")), for: .hold(3))
+        s.setAction(.openApp(path: "/Applications/Safari.app"), for: .tap(4))
+        s.setAction(.none, for: .swipe(3, .up))
+        let decoded = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(s))
+        #expect(decoded == s)
+        #expect(decoded.action(for: .swipe(3, .up)) == .none)  // an explicit "Nothing" overrides the default
+    }
+
+    @Test func missingFieldsUseDefaults() throws {
+        let s = try JSONDecoder().decode(Settings.self, from: Data(#"{"scrollSpeed": 2}"#.utf8))
+        #expect(s.scrollSpeed == 2)
+        #expect(s.glideLength == Settings().glideLength)
+        #expect(s.action(for: .swipe(3, .down)) == .system(.appExpose))
+    }
+
+    @Test func holdsTurnOnWhenTheyHaveAnAction() {
+        var s = Settings()
+        s.setAction(.system(.showDesktop), for: .hold(4))
+        #expect(GestureConfig(settings: s).enabledHolds == [4])
+    }
+
+    @Test func slotIDsAreUnique() {
+        let ids = GestureSlot.configurable.map(\.id)
+        #expect(Set(ids).count == ids.count && ids.count == 13)
     }
 }

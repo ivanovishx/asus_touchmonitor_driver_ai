@@ -8,12 +8,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let pauseItem = NSMenuItem(title: "Pause Touch", action: #selector(togglePause), keyEquivalent: "")
     private let isPanelConnected: () -> Bool
     private let panelProblem: () -> String?
+    private let onOpenPanel: () -> Void
     private let onPauseChange: (Bool) -> Void
     private var paused = false
 
-    init(isPanelConnected: @escaping () -> Bool, panelProblem: @escaping () -> String?, onPauseChange: @escaping (Bool) -> Void) {
+    init(isPanelConnected: @escaping () -> Bool, panelProblem: @escaping () -> String?,
+         onOpenPanel: @escaping () -> Void, onPauseChange: @escaping (Bool) -> Void) {
         self.isPanelConnected = isPanelConnected
         self.panelProblem = panelProblem
+        self.onOpenPanel = onOpenPanel
         self.onPauseChange = onPauseChange
         super.init()
 
@@ -22,6 +25,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         statusLine.isEnabled = false
         menu.addItem(statusLine)
         menu.addItem(.separator())
+        menu.addItem(action("Gestures & Settings…", #selector(openPanel), key: ","))
         pauseItem.target = self
         menu.addItem(pauseItem)
         menu.addItem(action("Input Monitoring Settings…", #selector(openInputMonitoring)))
@@ -58,6 +62,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menuItem.target = self
         return menuItem
     }
+
+    @objc private func openPanel() { onOpenPanel() }
 
     @objc private func togglePause() {
         paused.toggle()

@@ -17,11 +17,34 @@ No kernel extension, no DriverKit, no SIP changes.
 | 1-finger move | drag |
 | 1-finger hold (0.6 s) | right click |
 | 2-finger move | scroll (content follows your fingers); flick and lift to keep gliding with inertia, touch to stop |
-| 2-finger pinch out / in | zoom in / out (trackpad-style magnify; `--zoom-keys` uses ⌘+ / ⌘− instead) |
+| 2-finger pinch out / in | zoom in / out |
 | 2-finger tap | right click |
+| **5-finger hold (2 s)** | **open the gestures panel** |
+
+### Customizable gestures
+
+These are set in the gestures panel. Hold 5 fingers still for 2 seconds, or choose **Gestures & Settings…** from
+the menu bar icon.
+
+| Gesture | Default |
+| --- | --- |
+| Hold 2, 3 or 4 fingers still | nothing (a hold only takes over once it has an action) |
+| 3- or 4-finger tap | nothing |
 | 3-finger swipe up / down | Mission Control / App Exposé |
 | 3-finger swipe left / right | next / previous Space |
-| 4-finger swipe left / right | next / previous tab (⌃Tab / ⌃⇧Tab: Chrome, Safari, Finder, Terminal…) |
+| 4-finger swipe up / down | Mission Control / App Exposé |
+| 4-finger swipe left / right | next / previous tab (⌃Tab / ⌃⇧Tab) |
+
+Each one can do one of three things:
+- **A built-in action.** Mission Control, App Exposé, Show Desktop, Apps, Spaces, tab actions (new, close, reopen,
+  next, previous), Back/Forward, Spotlight, Screenshot, full screen, minimize, hide, lock screen,
+  copy/paste/undo/redo, zoom, right or middle click, volume, mute and media keys.
+- **A recorded keyboard shortcut.** Click *Record Shortcut*, then press the keys.
+- **Open an app.**
+
+The panel's **Settings** tab sets scroll speed, inertia and glide length, the long-press and multi-finger-hold
+durations, the pinch zoom style (smooth trackpad-style, or ⌘+ / ⌘− steps), and the axis flips. Changes apply
+immediately and are saved to `~/Library/Application Support/ZenTouch/settings.json`.
 
 ## Run it
 
@@ -38,15 +61,16 @@ The first run asks for **Input Monitoring** (reading the panel) and **Accessibil
 terminal app. Grant both in System Settings → Privacy & Security, then run it again.
 
 Pinch zoom posts the same magnify gesture events a MacBook trackpad sends. Those event fields are undocumented, so if
-an app ignores them, run with `--zoom-keys` to zoom in ⌘+ / ⌘− steps instead.
+an app ignores them, switch the panel's pinch zoom setting to steps.
 
-If the axes are wrong, add `--swap-xy`, `--flip-x` and/or `--flip-y`. Display rotation set in System Settings is
-handled automatically. `--help` lists all options.
+If the axes are wrong, fix them in the panel's Settings tab (or with `--swap-xy`, `--flip-x`, `--flip-y`). Display
+rotation set in System Settings is handled automatically. `--help` lists all options; `--show-panel` opens the panel
+at launch.
 
 ## Install as an app (starts at login)
 
 ```bash
-scripts/install.sh            # pass flags here, e.g. scripts/install.sh --zoom-keys --flip-y
+scripts/install.sh            # settings live in the gestures panel; flags still work too
 scripts/install.sh --uninstall
 ```
 
@@ -69,7 +93,8 @@ Logs are in `~/Library/Logs/zentouch.log`.
 - `Sources/ZenTouchCore/DisplayMapper.swift`: panel to screen coordinates, rotation and calibration
 - `Sources/ZenTouchCore/GestureEngine.swift`: touch frames to clicks, drags, scrolls and shortcuts
 - `Sources/ZenTouchCore/Momentum.swift`: smartphone-style inertia after a flick
-- `Sources/zentouch/`: IOKit HID access, display lookup, CGEvent injection, menu bar
+- `Sources/ZenTouchCore/GestureActions.swift`, `Settings.swift`: configurable gesture slots, actions and saved settings
+- `Sources/zentouch/`: IOKit HID access, display lookup, CGEvent injection, actions, menu bar, gestures panel (SwiftUI)
 
 ```bash
 swift test

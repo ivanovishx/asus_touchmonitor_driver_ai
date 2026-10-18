@@ -10,18 +10,20 @@ Touchscreen driver for the ASUS ZenScreen MB16AMT (eGalax EXC3200) on macOS.
   --display NAME   match the touch display by name (default: MB16AMT; falls back to the first external display)
   --dump           print contacts and gestures instead of moving the cursor
   --no-seize       don't take exclusive access to the panel (macOS keeps handling it too)
-  --swap-xy        swap the panel axes
-  --flip-x         mirror horizontally
-  --flip-y         mirror vertically
+  --swap-xy        swap the panel axes          (these four also change the saved settings,
+  --flip-x         mirror horizontally           which you can edit in the gestures panel:
+  --flip-y         mirror vertically             hold 5 fingers for 2 s, or use the menu bar)
   --zoom-keys      pinch zooms with ⌘+ / ⌘− steps instead of trackpad-style gestures
+  --show-panel     open the gestures panel at launch
   --help           show this help
 """
 
 var displayQuery = "MB16AMT"
 var dump = false
 var seize = true
-var zoomStyle = ZoomStyle.gesture
-var calibration = Calibration()
+var showPanel = false
+var snapshotPath: String?  // debug: --snapshot-panel PATH draws the panel's tabs to PATH-0.png / PATH-1.png and exits
+let store = SettingsStore()
 
 var args = CommandLine.arguments.dropFirst()
 while let arg = args.popFirst() {
@@ -29,10 +31,12 @@ while let arg = args.popFirst() {
     case "--display": displayQuery = args.popFirst() ?? displayQuery
     case "--dump": dump = true
     case "--no-seize": seize = false
-    case "--swap-xy": calibration.swapXY = true
-    case "--flip-x": calibration.flipX = true
-    case "--flip-y": calibration.flipY = true
-    case "--zoom-keys": zoomStyle = .keys
+    case "--show-panel": showPanel = true
+    case "--snapshot-panel": snapshotPath = args.popFirst()
+    case "--swap-xy": store.settings.swapXY = true
+    case "--flip-x": store.settings.flipX = true
+    case "--flip-y": store.settings.flipY = true
+    case "--zoom-keys": store.settings.zoomWithKeys = true
     case "--help", "-h": print(usage); exit(0)
     default: print("unknown option \(arg)\n\n\(usage)"); exit(64)
     }
@@ -59,20 +63,40 @@ if let display = DisplayLocator.find(nameContaining: displayQuery) {
     log("Touch display not connected yet; waiting for it.")
 }
 
+let app = NSApplication.shared
 var parser = EGalaxReportParser()
 var engine = GestureEngine()
-let injector = EventInjector(zoomStyle: zoomStyle)
+let injector = EventInjector()
+let performer = ActionPerformer(injector: injector)
+let gesturePanel = GesturePanelController(store: store, displayQuery: displayQuery)
+var calibration = Calibration()
 var mapper: DisplayMapper?
 var panelConnected = false
 var paused = false
 
 func now() -> Double { ProcessInfo.processInfo.systemUptime }
 
+/// Settings from the panel take effect immediately, mid-gesture included.
+func apply(_ settings: Settings) {
+    engine.config = GestureConfig(settings: settings)
+    injector.zoomStyle = settings.zoomWithKeys ? .keys : .gesture
+    calibration = settings.calibration
+}
+apply(store.settings)
+store.onChange = apply
+
 func handle(_ actions: [TouchAction]) {
-    if dump {
-        actions.forEach { log("  → \($0)") }
-    } else {
-        actions.forEach(injector.perform)
+    for action in actions {
+        if dump {
+            log("  → \(action)")
+            if case .gesture(let slot) = action { log("    = \(store.settings.action(for: slot).title)") }
+            continue
+        }
+        switch action {
+        case .gesture(let slot): performer.perform(store.settings.action(for: slot))
+        case .openPanel: gesturePanel.show()
+        default: injector.perform(action)
+        }
     }
 }
 
@@ -126,14 +150,28 @@ let signalSources = [SIGINT, SIGTERM].map { sig in
 }
 
 // A menu bar app with no Dock icon or main window.
-let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let statusMenu = dump ? nil : StatusMenu(isPanelConnected: { panelConnected }, panelProblem: { device.problem }, onPauseChange: { isPaused in
-    if isPaused { finishGesture() }
-    paused = isPaused
-    log(isPaused ? "Paused" : "Resumed")
-})
+let statusMenu = dump ? nil : StatusMenu(
+    isPanelConnected: { panelConnected },
+    panelProblem: { device.problem },
+    onOpenPanel: { gesturePanel.show() },
+    onPauseChange: { isPaused in
+        if isPaused { finishGesture() }
+        paused = isPaused
+        log(isPaused ? "Paused" : "Resumed")
+    }
+)
 let terminationObserver = NotificationCenter.default.addObserver(
     forName: NSApplication.willTerminateNotification, object: nil, queue: .main
 ) { _ in shutDown() }
+if showPanel { DispatchQueue.main.async { gesturePanel.show() } }
+if let snapshotPath {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        for tab in 0...1 {
+            do { try gesturePanel.snapshot(tab: tab, to: URL(fileURLWithPath: "\(snapshotPath)-\(tab).png")) }
+            catch { log("Snapshot failed: \(error)") }
+        }
+        exit(0)
+    }
+}
 app.run()

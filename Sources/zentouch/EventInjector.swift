@@ -14,7 +14,7 @@ final class EventInjector {
     private let source = CGEventSource(stateID: .hidSystemState)
     // Pixel scroll deltas are integers; carry the fractions so slow scrolls still move.
     private var scrollRemainder = CGVector.zero
-    private let zoomStyle: ZoomStyle
+    var zoomStyle: ZoomStyle
     // Pinch progress (log scale) not yet turned into a ⌘+ / ⌘− step.
     private var zoomProgress = 0.0
     private static let zoomStep = log(1.2)
@@ -61,8 +61,8 @@ final class EventInjector {
             scroll(dx: dx, dy: dy, at: p, scrollPhase: 0, momentumPhase: momentumPhase)
         case .magnify(let amount, let p, let phase):
             magnify(amount, at: p, phase: phase)
-        case .shortcut(let shortcut):
-            press(shortcut)
+        case .gesture, .openPanel:
+            break  // handled by ActionPerformer / the panel
         }
     }
 
@@ -122,25 +122,20 @@ final class EventInjector {
         }
     }
 
-    private func press(_ shortcut: Shortcut) {
-        let arrow: CGEventFlags = [.maskControl, .maskSecondaryFn, .maskNumericPad]
-        let (key, flags): (CGKeyCode, CGEventFlags) = switch shortcut {
-        case .spaceLeft: (123, arrow)       // ⌃←
-        case .spaceRight: (124, arrow)      // ⌃→
-        case .appExpose: (125, arrow)       // ⌃↓
-        case .missionControl: (126, arrow)  // ⌃↑
-        // ⌃Tab / ⌃⇧Tab: tab switching in Chrome, Safari, Finder, Terminal and most tabbed apps.
-        case .nextTab: (48, [.maskControl])
-        case .previousTab: (48, [.maskControl, .maskShift])
-        }
-        self.key(key, flags: flags)
-    }
-
-    private func key(_ key: CGKeyCode, flags: CGEventFlags) {
+    /// Presses and releases a key with modifiers.
+    func key(_ key: CGKeyCode, flags: CGEventFlags) {
+        var flags = flags
+        // Arrow keys are "function" keys on Apple keyboards; shortcuts like ⌃→ only match with these bits.
+        if (123...126).contains(key) { flags.formUnion([.maskSecondaryFn, .maskNumericPad]) }
         for down in [true, false] {
             guard let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down) else { continue }
             event.flags = flags
             event.post(tap: .cghidEventTap)
         }
+    }
+
+    func middleClick(at p: CGPoint) {
+        mouse(.otherMouseDown, at: p, button: .center)
+        mouse(.otherMouseUp, at: p, button: .center)
     }
 }
