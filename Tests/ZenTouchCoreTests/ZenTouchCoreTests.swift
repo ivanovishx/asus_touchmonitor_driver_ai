@@ -170,6 +170,64 @@ func payload(count: Int, _ slots: [(tip: Bool, id: Int, x: Int, y: Int)]) -> [UI
         guard case .scroll(_, _, _, .began) = actions.last else { Issue.record("expected scroll: \(actions)"); return }
     }
 
+    /// Scrolls two fingers down at `speed` points/s, sampled at 100 Hz for 0.2 s, and returns the lift time.
+    func scrollDown(_ e: inout GestureEngine, speed: Double) -> Double {
+        var t = 0.0
+        _ = e.update(pair(gap: 100), at: t)
+        for i in 1...20 {
+            t = Double(i) * 0.01
+            _ = e.update(pair(gap: 100).map { CGPoint(x: $0.x, y: $0.y + speed * t) }, at: t)
+        }
+        return t
+    }
+
+    func glide(_ e: inout GestureEngine, from t0: Double, seconds: Double) -> [TouchAction] {
+        stride(from: t0 + 1.0 / 60, through: t0 + seconds, by: 1.0 / 60).flatMap { e.tick(at: $0) }
+    }
+
+    @Test func flickKeepsScrollingAndSlowsDown() {
+        var e = GestureEngine()
+        let lift = scrollDown(&e, speed: 1500)
+        #expect(e.update([], at: lift).last.map { if case .scroll(_, _, _, .ended) = $0 { true } else { false } } == true)
+
+        let actions = glide(&e, from: lift, seconds: 4)
+        let deltas = actions.compactMap { if case .momentum(_, let dy, _, _) = $0 { dy } else { nil } }
+        guard case .momentum(_, _, _, .began) = actions.first,
+              case .momentum(_, _, _, .ended) = actions.last else { Issue.record("bad glide: \(actions.prefix(3))"); return }
+        #expect(deltas.allSatisfy { $0 >= 0 })                  // keeps going the way the fingers went
+        #expect(deltas[0] > deltas[10] && deltas[10] > deltas[30])  // and decelerates
+        let distance = deltas.reduce(0, +)
+        #expect(distance > 500 && distance < 650)               // ≈ speed × time constant = 600 pt
+        #expect(glide(&e, from: lift + 4, seconds: 0.5).isEmpty)
+    }
+
+    @Test func slowLiftDoesNotGlide() {
+        var e = GestureEngine()
+        let lift = scrollDown(&e, speed: 150)
+        _ = e.update([], at: lift)
+        #expect(glide(&e, from: lift, seconds: 0.5).isEmpty)
+    }
+
+    @Test func pausingBeforeLiftDoesNotGlide() {
+        var e = GestureEngine()
+        let lift = scrollDown(&e, speed: 1500)
+        _ = e.update([], at: lift + 0.2)  // fingers held still for 0.2 s, then lifted
+        #expect(glide(&e, from: lift + 0.2, seconds: 0.5).isEmpty)
+    }
+
+    @Test func touchStopsGlideWithoutClicking() {
+        var e = GestureEngine()
+        let lift = scrollDown(&e, speed: 1500)
+        _ = e.update([], at: lift)
+        _ = glide(&e, from: lift, seconds: 0.2)
+        let touch = e.update([p], at: lift + 0.25)
+        guard case .momentum(0, 0, _, .ended) = touch.first else { Issue.record("glide not stopped: \(touch)"); return }
+        #expect(e.update([], at: lift + 0.3) == [])           // the catching tap doesn't click
+        #expect(glide(&e, from: lift + 0.3, seconds: 0.5).isEmpty)
+        _ = e.update([p], at: lift + 1)                       // the next tap clicks again
+        #expect(e.update([], at: lift + 1.1).last == .leftUp(p, clicks: 1))
+    }
+
     let four = { (x: Double) in (0..<4).map { CGPoint(x: x + Double($0) * 50, y: 300) } }
 
     @Test func fourFingerSwipeLeftIsNextTab() {

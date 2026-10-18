@@ -22,6 +22,7 @@ final class EventInjector {
     // Not exposed as named CGEventField / CGEventType cases. These are the values a real trackpad's
     // magnify events carry (NSEventTypeGesture with a zoom subtype).
     private static let scrollPhaseField = CGEventField(rawValue: 99)!     // kCGScrollWheelEventScrollPhase
+    private static let momentumPhaseField = CGEventField(rawValue: 123)!  // kCGScrollWheelEventMomentumPhase
     private static let gestureType = CGEventType(rawValue: 29)!           // kCGSEventGesture
     private static let gestureHIDTypeField = CGEventField(rawValue: 110)!  // kCGEventGestureHIDType
     private static let gestureZoomField = CGEventField(rawValue: 113)!     // kCGEventGestureZoomValue
@@ -47,7 +48,17 @@ final class EventInjector {
             mouse(.rightMouseDown, at: p, button: .right)
             mouse(.rightMouseUp, at: p, button: .right)
         case .scroll(let dx, let dy, let p, let phase):
-            scroll(dx: dx, dy: dy, at: p, phase: phase)
+            if phase == .began { scrollRemainder = .zero }
+            scroll(dx: dx, dy: dy, at: p, scrollPhase: Self.phaseValue(phase), momentumPhase: 0)
+        case .momentum(let dx, let dy, let p, let phase):
+            // kCGMomentumScrollPhaseBegin / Continue / End: apps treat these like a trackpad's inertia,
+            // including the rubber-band bounce at the end of a page.
+            let momentumPhase: Int64 = switch phase {
+            case .began: 1
+            case .changed: 2
+            case .ended: 3
+            }
+            scroll(dx: dx, dy: dy, at: p, scrollPhase: 0, momentumPhase: momentumPhase)
         case .magnify(let amount, let p, let phase):
             magnify(amount, at: p, phase: phase)
         case .shortcut(let shortcut):
@@ -61,8 +72,7 @@ final class EventInjector {
         event.post(tap: .cghidEventTap)
     }
 
-    private func scroll(dx: Double, dy: Double, at p: CGPoint, phase: GesturePhase) {
-        if phase == .began { scrollRemainder = .zero }
+    private func scroll(dx: Double, dy: Double, at p: CGPoint, scrollPhase: Int64, momentumPhase: Int64) {
         // Direct manipulation: content follows the fingers, so finger-down (dy > 0) is a positive wheel delta.
         let x = dx + scrollRemainder.dx, y = dy + scrollRemainder.dy
         let wheelX = x.rounded(.towardZero), wheelY = y.rounded(.towardZero)
@@ -72,7 +82,8 @@ final class EventInjector {
                                   wheel1: Int32(wheelY), wheel2: Int32(wheelX), wheel3: 0) else { return }
         event.location = p
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
-        event.setIntegerValueField(Self.scrollPhaseField, value: Self.phaseValue(phase))
+        event.setIntegerValueField(Self.scrollPhaseField, value: scrollPhase)
+        event.setIntegerValueField(Self.momentumPhaseField, value: momentumPhase)
         event.post(tap: .cghidEventTap)
     }
 

@@ -20,6 +20,8 @@ public enum TouchAction: Equatable, Sendable {
     case rightClick(CGPoint)
     /// Finger displacement in points; positive dy means the fingers moved down.
     case scroll(dx: Double, dy: Double, at: CGPoint, phase: GesturePhase)
+    /// Inertia after a flick: the same units as `scroll`, sent after the fingers have lifted.
+    case momentum(dx: Double, dy: Double, at: CGPoint, phase: GesturePhase)
     /// Relative change in finger spread since the previous event (0.05 = fingers 5% further apart).
     case magnify(amount: Double, at: CGPoint, phase: GesturePhase)
     case shortcut(Shortcut)
@@ -37,13 +39,18 @@ public struct GestureConfig: Sendable {
     public var swipeDistance = 80.0
     /// Smallest change in finger spread (points) that can start a pinch instead of a scroll.
     public var pinchMinimum = 8.0
+    /// Finger speed (points/s) at lift-off needed to keep scrolling with inertia.
+    public var flickMinSpeed = 300.0
+    public var flickMaxSpeed = 6000.0
+    /// Seconds for the inertia's speed to fall to 37%; larger glides further.
+    public var momentumTimeConstant = 0.4
 
     public init() {}
 }
 
 /// Turns frames of touch points into mouse-like actions:
 ///   1 finger   tap = click (double/triple tap supported), move = drag, hold = right click
-///   2 fingers  move = scroll, pinch = zoom, tap = right click
+///   2 fingers  move = scroll (flick for inertia), pinch = zoom, tap = right click
 ///   3 fingers  swipe = Mission Control / App Exposé / switch Space
 ///   4 fingers  swipe left/right = next/previous tab (vertical behaves like 3 fingers)
 public struct GestureEngine {
@@ -62,6 +69,9 @@ public struct GestureEngine {
     private var spreadChange = 0.0           // accumulated like `travel`
     private var dragClicks = 1
     private var lastTap: (time: Double, point: CGPoint, clicks: Int)?
+    private var scrollSamples: [(time: Double, travel: CGVector)] = []  // recent positions, for flick speed
+    private var momentum = Momentum()
+    private var caughtMomentum = false       // this touch stopped a glide, so it isn't a tap
 
     public init(config: GestureConfig = GestureConfig()) {
         self.config = config
@@ -76,6 +86,9 @@ public struct GestureEngine {
         let s = spread(points, around: c)
 
         if mode == .idle {
+            // Touching the screen stops a glide, like on a phone.
+            caughtMomentum = momentum.isActive
+            let stopped = momentum.cancel()
             mode = .pending
             startTime = t
             anchor = c
@@ -85,7 +98,7 @@ public struct GestureEngine {
             travel = .zero
             lastSpread = s
             spreadChange = 0
-            return n == 1 ? [.move(c)] : []
+            return (stopped.map { [$0] } ?? []) + (n == 1 ? [.move(c)] : [])
         }
 
         maxFingers = max(maxFingers, n)
@@ -119,6 +132,7 @@ public struct GestureEngine {
                     return [.move(c), .magnify(amount: start > 1 ? s / start - 1 : 0, at: c, phase: .began)]
                 }
                 mode = .scrolling
+                scrollSamples = [(t, travel)]
                 return [.move(c), .scroll(dx: travel.dx, dy: travel.dy, at: c, phase: .began)]
             default:
                 return []  // 3+ fingers: decided on lift
@@ -126,7 +140,10 @@ public struct GestureEngine {
         case .dragging:
             return n == 1 ? [.leftDrag(c)] : []
         case .scrolling:
-            return countChanged ? [] : [.scroll(dx: delta.dx, dy: delta.dy, at: c, phase: .changed)]
+            guard !countChanged else { return [] }
+            scrollSamples.append((t, travel))
+            scrollSamples.removeAll { t - $0.time > 0.1 }
+            return [.scroll(dx: delta.dx, dy: delta.dy, at: c, phase: .changed)]
         case .pinching:
             guard !countChanged, n == 2, previousSpread > 1 else { return [] }
             return [.magnify(amount: s / previousSpread - 1, at: c, phase: .changed)]
@@ -135,9 +152,11 @@ public struct GestureEngine {
         }
     }
 
-    /// Call periodically (~20 Hz): long press fires even if the controller stops sending reports for a still finger.
+    /// Call at ~60 Hz: drives the inertia glide, and fires long press even if the controller stops
+    /// sending reports for a still finger.
     public mutating func tick(at t: Double) -> [TouchAction] {
-        guard mode == .pending, maxFingers == 1,
+        if let glide = momentum.step(at: t) { return [glide] }
+        guard mode == .pending, maxFingers == 1, !caughtMomentum,
               t - startTime >= config.longPress,
               length(travel) <= config.slop else { return [] }
         mode = .consumed
@@ -150,6 +169,7 @@ public struct GestureEngine {
         case .pending:
             switch maxFingers {
             case 1:
+                guard !caughtMomentum else { return [] }
                 let clicks = nextClicks(at: anchor, time: startTime)
                 lastTap = (t, anchor, clicks)
                 return [.move(anchor), .leftDown(anchor, clicks: clicks), .leftUp(anchor, clicks: clicks)]
@@ -162,12 +182,31 @@ public struct GestureEngine {
             lastTap = nil
             return [.leftUp(lastCentroid, clicks: dragClicks)]
         case .scrolling:
+            if let velocity = flickVelocity(at: t) {
+                momentum.timeConstant = config.momentumTimeConstant
+                momentum.start(velocity: velocity, at: lastCentroid, time: t)
+            }
             return [.scroll(dx: 0, dy: 0, at: lastCentroid, phase: .ended)]
         case .pinching:
             return [.magnify(amount: 0, at: lastCentroid, phase: .ended)]
         case .idle, .consumed:
             return []
         }
+    }
+
+    /// Finger velocity over the last ~0.1 s, if they were still moving fast when they lifted.
+    private func flickVelocity(at t: Double) -> CGVector? {
+        guard let first = scrollSamples.first, let last = scrollSamples.last,
+              t - last.time < 0.05,            // fingers stopped before lifting: no flick
+              last.time - first.time >= 0.01 else { return nil }
+        let span = last.time - first.time
+        var v = CGVector(dx: (last.travel.dx - first.travel.dx) / span, dy: (last.travel.dy - first.travel.dy) / span)
+        let speed = length(v)
+        guard speed >= config.flickMinSpeed else { return nil }
+        if speed > config.flickMaxSpeed {
+            v = CGVector(dx: v.dx / speed * config.flickMaxSpeed, dy: v.dy / speed * config.flickMaxSpeed)
+        }
+        return v
     }
 
     private func swipe() -> Shortcut? {

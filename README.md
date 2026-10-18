@@ -16,7 +16,7 @@ No kernel extension, no DriverKit, no SIP changes.
 | 1-finger tap | click (double and triple tap work) |
 | 1-finger move | drag |
 | 1-finger hold (0.6 s) | right click |
-| 2-finger move | scroll (content follows your fingers) |
+| 2-finger move | scroll (content follows your fingers); flick and lift to keep gliding with inertia, touch to stop |
 | 2-finger pinch out / in | zoom in / out (trackpad-style magnify; `--zoom-keys` uses ⌘+ / ⌘− instead) |
 | 2-finger tap | right click |
 | 3-finger swipe up / down | Mission Control / App Exposé |
@@ -68,6 +68,7 @@ Logs are in `~/Library/Logs/zentouch.log`.
 - `Sources/ZenTouchCore/EGalaxReportParser.swift`: decodes input report 6, including hybrid frames with more than 5 contacts
 - `Sources/ZenTouchCore/DisplayMapper.swift`: panel to screen coordinates, rotation and calibration
 - `Sources/ZenTouchCore/GestureEngine.swift`: touch frames to clicks, drags, scrolls and shortcuts
+- `Sources/ZenTouchCore/Momentum.swift`: smartphone-style inertia after a flick
 - `Sources/zentouch/`: IOKit HID access, display lookup, CGEvent injection, menu bar
 
 ```bash

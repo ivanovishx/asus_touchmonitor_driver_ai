@@ -102,7 +102,7 @@ let device = TouchDevice(seize: seize, onReport: { payload in
 device.start()
 log(dump ? "Dumping touches. Ctrl-C to quit." : "Running.")
 
-let ticker = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+let ticker = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { _ in
     guard !paused else { return }
     handle(engine.tick(at: now()))
 }
