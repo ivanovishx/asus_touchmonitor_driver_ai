@@ -7,6 +7,8 @@ public struct Calibration: Equatable, Sendable {
     public var flipY = false
     /// Raw panel range actually reachable at the screen edges, normalized. Lets you trim a bezel offset.
     public var minX = 0.0, maxX = 1.0, minY = 0.0, maxY = 1.0
+    /// Shift (points) added to every touch, for a panel that reads slightly beside your finger.
+    public var offsetX = 0.0, offsetY = 0.0
 
     public init() {}
 }
@@ -46,9 +48,11 @@ public struct DisplayMapper {
         u = min(max(u, 0), 1)
         v = min(max(v, 0), 1)
         // Stay one point inside the right/bottom edge so the cursor never jumps to the neighbouring display.
+        let x = bounds.minX + u * (bounds.width - 1) + c.offsetX
+        let y = bounds.minY + v * (bounds.height - 1) + c.offsetY
         return CGPoint(
-            x: bounds.minX + u * (bounds.width - 1),
-            y: bounds.minY + v * (bounds.height - 1)
+            x: min(max(x, bounds.minX), bounds.maxX - 1),
+            y: min(max(y, bounds.minY), bounds.maxY - 1)
         )
     }
 }

@@ -43,6 +43,10 @@ final class EventInjector {
             mouse(.leftMouseDragged, at: p)
         case .leftUp(let p, let clicks):
             mouse(.leftMouseUp, at: p, clicks: clicks)
+        case .click(let p, let clicks):
+            mouse(.mouseMoved, at: p)
+            mouse(.leftMouseDown, at: p, clicks: clicks)
+            mouse(.leftMouseUp, at: p, clicks: clicks)
         case .rightClick(let p):
             mouse(.mouseMoved, at: p)
             mouse(.rightMouseDown, at: p, button: .right)

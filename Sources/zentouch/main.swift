@@ -42,6 +42,9 @@ while let arg = args.popFirst() {
     }
 }
 
+// Settings given as flags are kept, as before the panel had a Save button.
+if store.hasUnsavedChanges { store.save() }
+
 setvbuf(stdout, nil, _IOLBF, 0)
 
 func log(_ message: String) { print("[zentouch] \(message)") }
@@ -68,6 +71,7 @@ var parser = EGalaxReportParser()
 var engine = GestureEngine()
 let injector = EventInjector()
 let performer = ActionPerformer(injector: injector)
+let targeter = TouchTargeter()
 let gesturePanel = GesturePanelController(store: store, displayQuery: displayQuery)
 var calibration = Calibration()
 var mapper: DisplayMapper?
@@ -81,6 +85,7 @@ func apply(_ settings: Settings) {
     engine.config = GestureConfig(settings: settings)
     injector.zoomStyle = settings.zoomWithKeys ? .keys : .gesture
     calibration = settings.calibration
+    targeter.radius = settings.touchArea
 }
 apply(store.settings)
 store.onChange = apply
@@ -95,6 +100,8 @@ func handle(_ actions: [TouchAction]) {
         switch action {
         case .gesture(let slot): performer.perform(store.settings.action(for: slot))
         case .openPanel: gesturePanel.show()
+        case .click(let p, let clicks): injector.perform(.click(targeter.target(for: p), clicks: clicks))
+        case .rightClick(let p): injector.perform(.rightClick(targeter.target(for: p)))
         default: injector.perform(action)
         }
     }

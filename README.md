@@ -43,8 +43,18 @@ Each one can do one of three things:
 - **Open an app.**
 
 The panel's **Settings** tab sets scroll speed, inertia and glide length, the long-press and multi-finger-hold
-durations, the pinch zoom style (smooth trackpad-style, or ⌘+ / ⌘− steps), and the axis flips. Changes apply
-immediately and are saved to `~/Library/Application Support/ZenTouch/settings.json`.
+durations, touch accuracy, the pinch zoom style (smooth trackpad-style, or ⌘+ / ⌘− steps), and the axis flips.
+
+**Touch accuracy:**
+- **Offset** shifts every touch by up to 40 points horizontally and vertically, if clicks land consistently beside
+  your finger.
+- **Touch area** works like a phone. A tap that lands within that many points of a button, link, checkbox or text
+  field snaps onto it, found through macOS Accessibility. Taps that already hit something clickable aren't moved.
+  In Chrome and Electron apps this turns on accessibility for web content, which can slow down very large pages a
+  little. Changes apply
+immediately, so you can try them with your fingers. Press **Save** (⌘S) to keep them, or **Discard Changes** to go
+back to the last saved settings. Closing the panel with unsaved changes asks which you want. Saved settings live in
+`~/Library/Application Support/ZenTouch/settings.json`.
 
 ## Run it
 
@@ -93,6 +103,7 @@ Logs are in `~/Library/Logs/zentouch.log`.
 - `Sources/ZenTouchCore/DisplayMapper.swift`: panel to screen coordinates, rotation and calibration
 - `Sources/ZenTouchCore/GestureEngine.swift`: touch frames to clicks, drags, scrolls and shortcuts
 - `Sources/ZenTouchCore/Momentum.swift`: smartphone-style inertia after a flick
+- `Sources/ZenTouchCore/TouchArea.swift`, `Sources/zentouch/TouchTargeter.swift`: snapping taps to nearby targets
 - `Sources/ZenTouchCore/GestureActions.swift`, `Settings.swift`: configurable gesture slots, actions and saved settings
 - `Sources/zentouch/`: IOKit HID access, display lookup, CGEvent injection, actions, menu bar, gestures panel (SwiftUI)
 

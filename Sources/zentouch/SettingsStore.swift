@@ -1,7 +1,8 @@
 import Foundation
 import ZenTouchCore
 
-/// Loads and saves the panel's settings, and tells the driver when they change.
+/// Holds the panel's settings. Edits apply to the driver immediately (so you can try them with your
+/// fingers) but are only written to disk on `save()`; `discard()` goes back to the last saved state.
 final class SettingsStore: ObservableObject {
     static let fileURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/ZenTouch/settings.json")
@@ -9,30 +10,36 @@ final class SettingsStore: ObservableObject {
     @Published var settings: Settings {
         didSet {
             guard settings != oldValue else { return }
-            save()
             onChange?(settings)
         }
     }
 
+    /// What's on disk.
+    @Published private(set) var saved: Settings
+
+    var hasUnsavedChanges: Bool { settings != saved }
+
     var onChange: ((Settings) -> Void)?
 
     init() {
-        if let data = try? Data(contentsOf: Self.fileURL),
-           let saved = try? JSONDecoder().decode(Settings.self, from: data) {
-            settings = saved
-        } else {
-            settings = Settings()
-        }
+        let loaded = (try? Data(contentsOf: Self.fileURL)).flatMap { try? JSONDecoder().decode(Settings.self, from: $0) }
+        settings = loaded ?? Settings()
+        saved = loaded ?? Settings()
     }
 
-    private func save() {
+    func save() {
         do {
             try FileManager.default.createDirectory(at: Self.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(settings).write(to: Self.fileURL, options: .atomic)
+            saved = settings
         } catch {
             print("[zentouch] Couldn't save settings: \(error)")
         }
+    }
+
+    func discard() {
+        settings = saved
     }
 }

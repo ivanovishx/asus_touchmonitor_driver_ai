@@ -63,6 +63,22 @@ func payload(count: Int, _ slots: [(tip: Bool, id: Int, x: Int, y: Int)]) -> [UI
         #expect(m.map(Contact(id: 0, x: 0, y: 0)) == CGPoint(x: 1512 + 1919, y: 1079))
     }
 
+    @Test func offsetShiftsTouches() {
+        var c = Calibration()
+        c.offsetX = 10
+        c.offsetY = -5
+        let m = DisplayMapper(bounds: bounds, calibration: c)
+        #expect(m.map(Contact(id: 0, x: 0.5, y: 0.5)) == CGPoint(x: 1512 + 959.5 + 10, y: 539.5 - 5))
+    }
+
+    @Test func offsetNeverLeavesTheDisplay() {
+        var c = Calibration()
+        c.offsetX = -40
+        c.offsetY = 40
+        let m = DisplayMapper(bounds: bounds, calibration: c)
+        #expect(m.map(Contact(id: 0, x: 0, y: 1)) == CGPoint(x: 1512, y: 1079))
+    }
+
     @Test func flipX() {
         var c = Calibration()
         c.flipX = true
@@ -77,14 +93,14 @@ func payload(count: Int, _ slots: [(tip: Bool, id: Int, x: Int, y: Int)]) -> [UI
     @Test func tapClicks() {
         var e = GestureEngine()
         #expect(e.update([p], at: 0) == [.move(p)])
-        #expect(e.update([], at: 0.1) == [.move(p), .leftDown(p, clicks: 1), .leftUp(p, clicks: 1)])
+        #expect(e.update([], at: 0.1) == [.click(p, clicks: 1)])
     }
 
     @Test func doubleTap() {
         var e = GestureEngine()
         _ = e.update([p], at: 0); _ = e.update([], at: 0.1)
         _ = e.update([p], at: 0.25)
-        #expect(e.update([], at: 0.3).last == .leftUp(p, clicks: 2))
+        #expect(e.update([], at: 0.3) == [.click(p, clicks: 2)])
     }
 
     @Test func dragAfterSlop() {
@@ -226,7 +242,7 @@ func payload(count: Int, _ slots: [(tip: Bool, id: Int, x: Int, y: Int)]) -> [UI
         #expect(e.update([], at: lift + 0.3) == [])           // the catching tap doesn't click
         #expect(glide(&e, from: lift + 0.3, seconds: 0.5).isEmpty)
         _ = e.update([p], at: lift + 1)                       // the next tap clicks again
-        #expect(e.update([], at: lift + 1.1).last == .leftUp(p, clicks: 1))
+        #expect(e.update([], at: lift + 1.1) == [.click(p, clicks: 1)])
     }
 
     let four = { (x: Double) in (0..<4).map { CGPoint(x: x + Double($0) * 50, y: 300) } }
@@ -353,5 +369,32 @@ func payload(count: Int, _ slots: [(tip: Bool, id: Int, x: Int, y: Int)]) -> [UI
     @Test func slotIDsAreUnique() {
         let ids = GestureSlot.configurable.map(\.id)
         #expect(Set(ids).count == ids.count && ids.count == 13)
+    }
+}
+
+@Suite struct TouchAreaTests {
+    let center = CGPoint(x: 100, y: 100)
+
+    @Test func noRadiusNoSamples() {
+        #expect(TouchArea.samplePoints(around: center, radius: 0).isEmpty)
+    }
+
+    @Test func samplesGoOutwardWithinRadius() {
+        let points = TouchArea.samplePoints(around: center, radius: 24)
+        let distances = points.map { hypot($0.x - center.x, $0.y - center.y) }
+        #expect(distances.allSatisfy { $0 <= 24.001 && $0 >= 7.999 })
+        #expect(zip(distances, distances.dropFirst()).allSatisfy { $0 <= $1 + 0.001 })  // nearest first
+        #expect(points.count == 8 + 13 + 19)  // rings at 8, 16, 24 pt, ~8 pt apart
+    }
+
+    @Test func nearestPointClampsIntoTheFrame() {
+        let button = CGRect(x: 120, y: 90, width: 60, height: 20)
+        #expect(TouchArea.nearestPoint(in: button, to: center) == CGPoint(x: 123, y: 100))
+        #expect(TouchArea.nearestPoint(in: button, to: CGPoint(x: 150, y: 50)) == CGPoint(x: 150, y: 93))
+    }
+
+    @Test func accuracySettingsDefaultOff() throws {
+        let s = try JSONDecoder().decode(Settings.self, from: Data("{}".utf8))
+        #expect(s.touchArea == 0 && s.touchOffsetX == 0 && s.touchOffsetY == 0)
     }
 }

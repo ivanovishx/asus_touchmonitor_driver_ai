@@ -8,6 +8,8 @@ public enum TouchAction: Equatable, Sendable {
     case leftDown(CGPoint, clicks: Int)
     case leftDrag(CGPoint)
     case leftUp(CGPoint, clicks: Int)
+    /// A tap: move there, press and release. Kept as one action so the app can adjust where it lands.
+    case click(CGPoint, clicks: Int)
     case rightClick(CGPoint)
     /// Finger displacement in points; positive dy means the fingers moved down.
     case scroll(dx: Double, dy: Double, at: CGPoint, phase: GesturePhase)
@@ -195,7 +197,7 @@ public struct GestureEngine {
                 guard !caughtMomentum else { return [] }
                 let clicks = nextClicks(at: anchor, time: startTime)
                 lastTap = (t, anchor, clicks)
-                return [.move(anchor), .leftDown(anchor, clicks: clicks), .leftUp(anchor, clicks: clicks)]
+                return [.click(anchor, clicks: clicks)]
             case 2:
                 return t - startTime <= config.multiFingerTapMax ? [.rightClick(lastCentroid)] : []
             case 3, 4:

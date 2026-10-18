@@ -3,7 +3,7 @@ import SwiftUI
 import ZenTouchCore
 
 /// The gestures & settings window. Opened by holding 5 fingers, or from the menu bar.
-final class GesturePanelController {
+final class GesturePanelController: NSObject, NSWindowDelegate {
     private let store: SettingsStore
     private let displayQuery: String
     private var window: NSWindow?
@@ -11,6 +11,7 @@ final class GesturePanelController {
     init(store: SettingsStore, displayQuery: String) {
         self.store = store
         self.displayQuery = displayQuery
+        super.init()
     }
 
     /// Draws the panel (on the given tab) into a PNG, for checking the layout without a screenshot.
@@ -18,9 +19,20 @@ final class GesturePanelController {
         let window = makeWindow(tab: tab)
         window.orderFront(nil)
         guard let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-        view.cacheDisplay(in: view.bounds, to: rep)
+        view.cacheDisplay(in: view.bounds, to: rep)  // draws the form; the tab bar and Save bar don't render this way
         try rep.representation(using: .png, properties: [:])?.write(to: url)
         window.close()
+        // The Save bar sits outside the form, which cacheDisplay doesn't draw in place; render it on its own.
+        let bar = NSHostingView(rootView: SaveBar(store: store).padding(12).frame(width: 760).background(Color(nsColor: .windowBackgroundColor)))
+        let barWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 60), styleMask: [.borderless], backing: .buffered, defer: false)
+        barWindow.contentView = bar
+        barWindow.orderFront(nil)
+        bar.layoutSubtreeIfNeeded()
+        if let barRep = bar.bitmapImageRepForCachingDisplay(in: bar.bounds) {
+            bar.cacheDisplay(in: bar.bounds, to: barRep)
+            try barRep.representation(using: .png, properties: [:])?.write(to: url.deletingPathExtension().appendingPathExtension("bar.png"))
+        }
+        barWindow.close()
     }
 
     func show() {
@@ -42,7 +54,24 @@ final class GesturePanelController {
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.setContentSize(NSSize(width: 760, height: 720))
         window.isReleasedWhenClosed = false
+        window.delegate = self
         return window
+    }
+
+    /// Closing with unsaved changes asks what to do with them.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard store.hasUnsavedChanges else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Save your gesture and settings changes?"
+        alert.informativeText = "If you don't save, ZenTouch goes back to your last saved settings."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: store.save(); return true
+        case .alertSecondButtonReturn: store.discard(); return true
+        default: return false
+        }
     }
 }
 
@@ -56,13 +85,44 @@ struct GesturePanelView: View {
     }
 
     var body: some View {
-        TabView(selection: $tab) {
-            GesturesTab(store: store).tabItem { Text("Gestures") }.tag(0)
-            SettingsTab(store: store).tabItem { Text("Settings") }.tag(1)
+        VStack(spacing: 10) {
+            TabView(selection: $tab) {
+                GesturesTab(store: store).tabItem { Text("Gestures") }.tag(0)
+                SettingsTab(store: store).tabItem { Text("Settings") }.tag(1)
+            }
+            SaveBar(store: store)
         }
         .padding(12)
         .frame(minWidth: 640, minHeight: 560)
         .controlSize(.large)  // easier to hit with a finger
+    }
+}
+
+/// Save / Discard, shared by both tabs. Edits already apply live; this decides whether they're kept.
+struct SaveBar: View {
+    @ObservedObject var store: SettingsStore
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if store.hasUnsavedChanges {
+                Label("Unsaved changes. They're active now, so you can try them.", systemImage: "circle.fill")
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(.orange)
+                    .font(.callout)
+            } else {
+                Label("All changes saved", systemImage: "checkmark.circle")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+            }
+            Spacer()
+            Button("Discard Changes", action: store.discard)
+                .disabled(!store.hasUnsavedChanges)
+            Button("Save", action: store.save)
+                .keyboardShortcut("s", modifiers: .command)
+                .buttonStyle(.borderedProminent)
+                .disabled(!store.hasUnsavedChanges)
+        }
+        .padding(.horizontal, 8)
     }
 }
 
@@ -240,6 +300,21 @@ struct SettingsTab: View {
                 SliderRow(title: "Touch and hold for right click", value: $store.settings.longPress, range: 0.3...1.5, format: "%.1f s")
                 SliderRow(title: "Multi-finger hold", value: $store.settings.holdDuration, range: 0.4...2, format: "%.1f s")
             }
+            Section {
+                SliderRow(title: "Move touches right / left", value: $store.settings.touchOffsetX, range: -40...40, format: "%+.0f pt")
+                SliderRow(title: "Move touches down / up", value: $store.settings.touchOffsetY, range: -40...40, format: "%+.0f pt")
+                SliderRow(title: "Touch area", value: $store.settings.touchArea, range: 0...40, format: "%.0f pt")
+                Button("Reset Accuracy") {
+                    store.settings.touchOffsetX = 0
+                    store.settings.touchOffsetY = 0
+                    store.settings.touchArea = 0
+                }
+            } header: {
+                Text("Touch accuracy")
+            } footer: {
+                Text("If clicks land beside your finger, move them the other way: e.g. clicks too far left → move right (+). Touch area snaps a tap onto a button, link, checkbox or field within that distance, like a phone; 0 turns it off. In Chrome it turns on accessibility for web pages, which can make very large pages a little slower.")
+                    .foregroundStyle(.secondary)
+            }
             Section("Zoom") {
                 Picker("Pinch zoom", selection: $store.settings.zoomWithKeys) {
                     Text("Smooth, like a trackpad").tag(false)
@@ -254,7 +329,7 @@ struct SettingsTab: View {
             Section {
                 Button("Restore Defaults", role: .destructive) { store.settings = Settings() }
             } footer: {
-                Text("Settings are saved automatically to \(SettingsStore.fileURL.path).")
+                Text("Changes apply right away so you can try them. Press Save to keep them; they're stored in \(SettingsStore.fileURL.path).")
                     .foregroundStyle(.secondary)
             }
         }

@@ -13,6 +13,11 @@ public struct Settings: Codable, Equatable, Sendable {
     public var swapXY = false
     public var flipX = false
     public var flipY = false
+    /// Shift (points) added to every touch.
+    public var touchOffsetX = 0.0
+    public var touchOffsetY = 0.0
+    /// Radius (points) within which a tap snaps onto a nearby button or link, like a phone. 0 = off.
+    public var touchArea = 0.0
     /// Action per GestureSlot.id. Slots not listed use `defaultBindings`.
     public var bindings: [String: GestureAction] = [:]
 
@@ -49,6 +54,9 @@ public struct Settings: Codable, Equatable, Sendable {
         swapXY = try c.decodeIfPresent(Bool.self, forKey: .swapXY) ?? d.swapXY
         flipX = try c.decodeIfPresent(Bool.self, forKey: .flipX) ?? d.flipX
         flipY = try c.decodeIfPresent(Bool.self, forKey: .flipY) ?? d.flipY
+        touchOffsetX = try c.decodeIfPresent(Double.self, forKey: .touchOffsetX) ?? d.touchOffsetX
+        touchOffsetY = try c.decodeIfPresent(Double.self, forKey: .touchOffsetY) ?? d.touchOffsetY
+        touchArea = try c.decodeIfPresent(Double.self, forKey: .touchArea) ?? d.touchArea
         bindings = try c.decodeIfPresent([String: GestureAction].self, forKey: .bindings) ?? d.bindings
     }
 
@@ -57,6 +65,8 @@ public struct Settings: Codable, Equatable, Sendable {
         c.swapXY = swapXY
         c.flipX = flipX
         c.flipY = flipY
+        c.offsetX = touchOffsetX
+        c.offsetY = touchOffsetY
         return c
     }
 }
